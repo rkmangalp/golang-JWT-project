@@ -23,18 +23,18 @@ func DBinstance() *mongo.Client {
 	// Get the MongoDB connection string from the environment variables.
 	MongoDb := os.Getenv("MONGODB_URL")
 
-	// Create a new MongoDB client with the connection string.
-	client, err := mongo.NewClient(options.Client().ApplyURI(MongoDb))
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Create a context with a timeout of 10 seconds for the connection.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Connect to MongoDB using the client and context.
-	err = client.Connect(ctx)
+	// Connect to MongoDB using the connection string and context.
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(MongoDb))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Ping the primary to verify that the client can connect.
+	err = client.Ping(ctx, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

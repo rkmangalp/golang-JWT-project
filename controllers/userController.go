@@ -22,12 +22,12 @@ import (
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
 var validate = validator.New()
 
-func HashPassword(password string) string{
-	bcrypt.GenerateFromPassword([]byte(password, 14))
-	if err != nil{
+func HashPassword(password string) string {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password, 14))
+	if err != nil {
 		log.Panic(err)
 	}
-	return string(bytes)
+	return string(hashedPassword)
 }
 
 func VerifyPassword(userPassword, providedPassword string) (bool, string) {
@@ -121,89 +121,123 @@ func Signup() gin.HandlerFunc {
 func Login() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
-		var user models.User
-		var foundUser models.User
-		defer cancel()
+		var user models.User      // Variable to hold user input
+		var foundUser models.User // Variable to hold the found user
+		defer cancel()            // Ensure the context is canceled at the end
 
+		// Bind incoming JSON request to user struct
 		if err := c.BindJSON(&user); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()}) // Return error if binding fails
 			return
 		}
 
+		// Find the user in the database by email
 		err := userCollection.FindOne(ctx, bson.M{"email": user.Email}).Decode((&foundUser))
-		defer cancel()
+		defer cancel() // Again, cancel context if needed
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "email or password is incorrect"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "email or password is incorrect"}) // Return error if user not found
 			return
 		}
 
+		// Verify the password provided against the stored password
 		passwordIsValid, msg := VerifyPassword(*user.Password, *foundUser.Password)
-		defer cancel()
+		defer cancel() // Cancel context if needed
 		if passwordIsValid != true {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": msg}) // Return error if password is invalid
 			return
 		}
 
-		if foundUser.Email == ""{
-			c.JSON(http.StatusInternalServerError, gin.H{"error":"user not found"})
+		// Check if the user was found
+		if foundUser.Email == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found"}) // Return error if no email
 		}
+
+		// Generate JWT and refresh token for the found user
 		token, refreshToken, _ := helpers.GenerateAllTokens(*foundUser.Email, *foundUser.First_name, *foundUser.Last_name, &foundUser.User_type, *&foundUser.User_id)
-		helpers.UpdateAllTokens(token, refreshToken, foundUser.User_id)
-		err := userCollection.FindOne(ctx, bson.M{"user_id":foundUser.User_id}).Decode(&foundUser)
 
-		if err != nil{
-			c.JSON(http.StatusInternalServerError, gin.H{"error":err.Error()})
+		// Update the user's tokens in the database
+		helpers.UpdateAllTokens(token, refreshToken, foundUser.User_id)
+
+		// Retrieve updated user information from the database
+		err := userCollection.FindOne(ctx, bson.M{"user_id": foundUser.User_id}).Decode(&foundUser)
+
+		// Return error if fetching updated user info fails
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		// Return the found user information as JSON
 		c.JSON(http.StatusOK, foundUser)
 	}
 }
 
-func GetUsers() gin.HandlerFunc{
-	return func(c *gin.Context){
-		if err := helpers.CheckUserType(c, "ADMIN"); err != nil{
-			c.JSON(http.StatusBadRequest, gin.H{"error":err.Error()})
-			return 
+func GetUsers() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Check if the current user has ADMIN role. Return an error if not.
+		if err := helpers.CheckUserType(c, "ADMIN"); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
-		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 
+		// Create a context with a 100-second timeout for the database operation.
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel() // Ensure context is canceled after the operation
+
+		// Get pagination parameters from the query string.
 		recordPerPage, err := strconv.Atoi(c.Query("recordPerPage"))
-		if err != nil || recordPerPage < 1{
-			recordPerPage = 10
+		if err != nil || recordPerPage < 1 {
+			recordPerPage = 10 // Default number of records per page
 		}
 		page, err1 := strconv.Atoi(c.Query("page"))
-		if err1 != nil || page < 1{
-			page = 1
+		if err1 != nil || page < 1 {
+			page = 1 // Default page number
 		}
 
+		// Calculate the starting index for pagination.
 		startIndex := (page - 1) * recordPerPage
-		startIndex, err = strconv.Atoi(c.Query("startIndex"))
 
-		matchStage := bson.D{{"$match", bson.D{{}}}}
-		groupStage := bson.D{{"$group", bson.D{
-			{"_id", bson.D{{"_id", "null"}}},
-			{"total_count", bson.D{{"$sum", 1}}}, 
-			{"data", bson.D{{"$push", "$$ROOT"}}},
-		}}}
-		projectStage := bson.D{
-			{"$project", bson.D{
-				{"_id",0},
-				{"total_count", 1},
-				{"user_items", bson.D{{"$slice", []interface{}{"$data", startIndex, recordPerPage}}}},
-			}}
+		// MongoDB aggregation pipeline stages.
+
+		// Match stage: To include all documents in this example.
+		matchStage := bson.D{{Key: "$match", Value: bson.D{{}}}}
+
+		// Group stage: Groups all documents and calculates the total count.
+		groupStage := bson.D{
+			{Key: "$group", Value: bson.D{
+				{Key: "_id", Value: "null"},
+				{Key: "total_count", Value: bson.D{{Key: "$sum", Value: 1}}},
+				{Key: "data", Value: bson.D{{Key: "$push", Value: "$$ROOT"}}},
+			}},
 		}
-	result, err := userCollection.Aggregate(ctx, mongo.Pipeline{
-		matchStage, groupStage, projectStage
-	})
-	defer cancel()
-	if err != nil{
-		c.JSON{http.StatusInternalServerError, gin.H{"error":"error occured while listing items"}}
-	}
-	var allUsers []bson.M
-	if err = result.All(ctx, &allUsers); err != nil{
-		log.Fatal(err)
-	}
-	c.JSON(http.StatusOK, allUsers[0])
+
+		// Project stage: Selects fields to return and applies pagination.
+		projectStage := bson.D{
+			{Key: "$project", Value: bson.D{
+				{Key: "_id", Value: 0},
+				{Key: "total_count", Value: 1},
+				{Key: "user_items", Value: bson.D{{Key: "$slice", Value: []interface{}{"$data", startIndex, recordPerPage}}}},
+			}},
+		}
+
+		// Perform the aggregation operation on the userCollection.
+		result, err := userCollection.Aggregate(ctx, mongo.Pipeline{
+			matchStage, groupStage, projectStage,
+		})
+
+		// Handle any errors during the aggregation.
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occurred while listing items"})
+			return
+		}
+
+		// Retrieve all documents from the result.
+		var allUsers []bson.M
+		if err = result.All(ctx, &allUsers); err != nil {
+			log.Fatal(err)
+		}
+
+		// Return the result as JSON.
+		c.JSON(http.StatusOK, allUsers[0])
 	}
 }
 
