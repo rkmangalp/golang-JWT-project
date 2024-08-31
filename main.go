@@ -13,7 +13,7 @@ func main() {
 
 	// If the "PORT" environment variable is not set, default to port 8000.
 	if port == "" {
-		port = "8000"
+		port = "9000"
 	}
 
 	// Create a new Gin router instance.

@@ -23,7 +23,7 @@ var userCollection *mongo.Collection = database.OpenCollection(database.Client, 
 var validate = validator.New()
 
 func HashPassword(password string) string {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password, 14))
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -159,7 +159,7 @@ func Login() gin.HandlerFunc {
 		helpers.UpdateAllTokens(token, refreshToken, foundUser.User_id)
 
 		// Retrieve updated user information from the database
-		err := userCollection.FindOne(ctx, bson.M{"user_id": foundUser.User_id}).Decode(&foundUser)
+		err = userCollection.FindOne(ctx, bson.M{"user_id": foundUser.User_id}).Decode(&foundUser)
 
 		// Return error if fetching updated user info fails
 		if err != nil {
