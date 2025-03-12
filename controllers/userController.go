@@ -13,10 +13,10 @@ import (
 	"github.com/rkmangalp/golang-JWT-project/database"
 	"github.com/rkmangalp/golang-JWT-project/helpers"
 	"github.com/rkmangalp/golang-JWT-project/models"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
-	"gopkg.in/mgo.v2/bson"
 )
 
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
@@ -142,19 +142,18 @@ func Login() gin.HandlerFunc {
 		// Verify the password provided against the stored password
 		passwordIsValid, msg := VerifyPassword(*user.Password, *foundUser.Password)
 		defer cancel() // Cancel context if needed
-		if passwordIsValid != true {
+		if !passwordIsValid {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msg}) // Return error if password is invalid
 			return
 		}
 
 		// Check if the user was found
-		if foundUser.Email == "" {
+		if *foundUser.Email == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found"}) // Return error if no email
 		}
 
 		// Generate JWT and refresh token for the found user
-		token, refreshToken, _ := helpers.GenerateAllTokens(*foundUser.Email, *foundUser.First_name, *foundUser.Last_name, &foundUser.User_type, *&foundUser.User_id)
-
+		token, refreshToken, _ := helpers.GenerateAllTokens(*foundUser.Email, *foundUser.First_name, *foundUser.Last_name, *foundUser.User_type, foundUser.User_id)
 		// Update the user's tokens in the database
 		helpers.UpdateAllTokens(token, refreshToken, foundUser.User_id)
 
